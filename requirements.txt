@@ -1,1 +1,5 @@
 common-code[test] @ git+https://github.com/swiss-ai-center/common-code.git@main
+accelerate==1.4.0
+diffusers==0.32.2
+torch===2.6.0
+transformers==4.49.0

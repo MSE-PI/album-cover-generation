@@ -24,3 +24,5 @@ __pycache__/
 ## macOS
 
 .DS_Store
+
+**/music-cover-model.ckpt

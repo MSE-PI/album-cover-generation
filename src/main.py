@@ -1,4 +1,5 @@
 import asyncio
+import io
 import time
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,69 +20,131 @@ from common_code.common.models import FieldDescription, ExecutionUnitTag
 from contextlib import asynccontextmanager
 
 # Imports required by the service's model
-# TODO: 1. ADD REQUIRED IMPORTS (ALSO IN THE REQUIREMENTS.TXT)
+from pydantic import BaseModel
+from fastapi.responses import FileResponse
+import json
+import os
+import zipfile
+import torch
+from diffusers import StableDiffusionPipeline
+from diffusers.pipelines.stable_diffusion.convert_from_ckpt import download_from_original_stable_diffusion_ckpt
+from io import BytesIO
 
 settings = get_settings()
 
+negative_prompts = "font++, typo++, signature, text++, watermark++, cropped, disfigured, duplicate, error, " \
+                   "jpeg artifacts, low quality, lowres, mutated hands, out of frame, worst quality"
+
+MODEL_ID = "stabilityai/stable-diffusion-2-base"
+CKPT_PATH = "./music-cover-model.ckpt"
+GUIDANCE_SCALE = 5
+
+def build_pipeline_from_model_id(model_id):
+    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16)
+    pipe = pipe.to("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    return pipe
+
+
+def build_model_from_ckpt(ckpt_path):
+    print("Building model from checkpoint")
+    pipe = download_from_original_stable_diffusion_ckpt(
+        checkpoint_path_or_dict=ckpt_path,
+        original_config_file="./v1-inference.yml"
+    )
+    pipe.to(torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32)
+    pipe.save_pretrained(MODEL_ID, safe_serialization=True)
+
+
+def prompt_builder(lyrics_infos, music_style):
+    # Check if a sentiment is dominant
+    dominant_sentiment = None
+    sentiment_prompts = ""
+    for sentiment in lyrics_infos["sentiments"]:
+        if lyrics_infos["sentiments"][sentiment] > 0.5:
+            dominant_sentiment = sentiment
+            break
+    if dominant_sentiment is not None and not "others":
+        sentiment_prompts = f'with a {dominant_sentiment}++++ sentiment '
+
+    prompt = (f'An {music_style["genre_top"]} album cover {sentiment_prompts}'
+              f'but without any text and illustrating the following themes:')
+    for i, word in enumerate(lyrics_infos["top_words"]):
+        if i == 0:
+            prompt += f' {word}++++++'
+        elif i == 1:
+            prompt += f', {word}++++'
+        elif i == 2:
+            prompt += f', {word}++'
+        else:
+            prompt += f', {word}'
+    return prompt
+
 
 class MyService(Service):
-    # TODO: 2. CHANGE THIS DESCRIPTION
     """
-    My service model
+    Album Cover Art Generation service
     """
 
     # Any additional fields must be excluded for Pydantic to work
-    _model: object
+    _model: StableDiffusionPipeline
     _logger: Logger
 
     def __init__(self):
         super().__init__(
-            # TODO: 3. CHANGE THE SERVICE NAME AND SLUG
-            name="My Service",
-            slug="my-service",
+            name="Album Cover Art Generation",
+            slug="album-cover-art-generation",
             url=settings.service_url,
             summary=api_summary,
             description=api_description,
             status=ServiceStatus.AVAILABLE,
-            # TODO: 4. CHANGE THE INPUT AND OUTPUT FIELDS, THE TAGS AND THE HAS_AI VARIABLE
             data_in_fields=[
-                FieldDescription(
-                    name="image",
-                    type=[
-                        FieldDescriptionType.IMAGE_PNG,
-                        FieldDescriptionType.IMAGE_JPEG,
-                    ],
-                ),
+                FieldDescription(name="lyrics_analysis", type=[FieldDescriptionType.APPLICATION_JSON]),
+                FieldDescription(name="music_style", type=[FieldDescriptionType.APPLICATION_JSON]),
             ],
             data_out_fields=[
-                FieldDescription(
-                    name="result", type=[FieldDescriptionType.APPLICATION_JSON]
-                ),
+                FieldDescription(name="image", type=[FieldDescriptionType.IMAGE_PNG]),
+                FieldDescription(name="metadata", type=[FieldDescriptionType.APPLICATION_JSON]),
             ],
             tags=[
                 ExecutionUnitTag(
-                    name=ExecutionUnitTagName.IMAGE_PROCESSING,
-                    acronym=ExecutionUnitTagAcronym.IMAGE_PROCESSING,
+                    name=ExecutionUnitTagName.IMAGE_GENERATION,
+                    acronym=ExecutionUnitTagAcronym.IMAGE_GENERATION
                 ),
             ],
-            has_ai=False,
+            has_ai=True,
             # OPTIONAL: CHANGE THE DOCS URL TO YOUR SERVICE'S DOCS
             docs_url="https://docs.swiss-ai-center.ch/reference/core-concepts/service/",
         )
         self._logger = get_logger(settings)
+        # load model from checkpoint ckpt file
+        print("Loading model")
+        self._model = build_pipeline_from_model_id(MODEL_ID)
+        print("Model loaded")
 
-    # TODO: 5. CHANGE THE PROCESS METHOD (CORE OF THE SERVICE)
     def process(self, data):
-        # NOTE that the data is a dictionary with the keys being the field names set in the data_in_fields
-        # The objects in the data variable are always bytes. It is necessary to convert them to the desired type
-        # before using them.
-        # raw = data["image"].data
-        # input_type = data["image"].type
-        # ... do something with the raw data
+        lyrics_analysis = json.loads(data["lyrics_analysis"].data)
+        print(f"Lyrics analysis: {lyrics_analysis}")
 
-        # NOTE that the result must be a dictionary with the keys being the field names set in the data_out_fields
+        music_style = json.loads(data["music_style"].data)
+        print(f"Music style: {music_style}")
+
+        prompt = prompt_builder(lyrics_analysis, music_style)
+        print(f"Prompt: {prompt}")
+
+        image = self._model(
+            prompt=prompt,
+            negative_prompts_embeds=negative_prompts,
+            guidance_scale=GUIDANCE_SCALE,
+        ).images[0]
+        image_bytes = io.BytesIO()
+        image.save(image_bytes, format="PNG")
+        image_bytes = image_bytes.getvalue()
+
         return {
-            "result": TaskData(data=..., type=FieldDescriptionType.APPLICATION_JSON)
+            "image": TaskData(
+                data=image_bytes,
+                type=FieldDescriptionType.IMAGE_PNG,
+            ),
         }
 
 
@@ -135,26 +198,20 @@ async def lifespan(app: FastAPI):
         await service_service.graceful_shutdown(my_service, engine_url)
 
 
-# TODO: 6. CHANGE THE API DESCRIPTION AND SUMMARY
-api_description = """My service
-bla bla bla...
+api_summary = """
+Generate art image (album cover) from lyrics and sentiments.
 """
-api_summary = """My service
-bla bla bla...
+
+api_description = """Album Cover Art Generation is an image generation API that allows you to generate an art image (album cover)
+from lyrics and music style generated with (stabilityai/stable-diffusion-2-base)
 """
 
 # Define the FastAPI application with information
-# TODO: 7. CHANGE THE API TITLE, VERSION, CONTACT AND LICENSE
 app = FastAPI(
     lifespan=lifespan,
-    title="Sample Service API.",
+    title="Album Cover Art Generation API.",
     description=api_description,
     version="0.0.1",
-    contact={
-        "name": "Swiss AI Center",
-        "url": "https://swiss-ai-center.ch/",
-        "email": "info@swiss-ai-center.ch",
-    },
     swagger_ui_parameters={
         "tagsSorter": "alpha",
         "operationsSorter": "method",
@@ -182,3 +239,71 @@ app.add_middleware(
 @app.get("/", include_in_schema=False)
 async def root():
     return RedirectResponse("/docs", status_code=301)
+
+
+class LyricsAnalysis(BaseModel):
+    language: str
+    sentiments: dict[str, float]
+    top_words: list[str]
+
+
+class MusicStyle(BaseModel):
+    genre_top: str
+
+
+class Data(BaseModel):
+    lyrics_analysis: LyricsAnalysis
+    music_style: MusicStyle
+
+
+# TODO: Correct this part of code
+@app.post("/process", tags=['Process'])
+async def handle_process(data: Data):
+    lyrics_analysis = data.lyrics_analysis
+    music_style = data.music_style
+
+    lyrics_analysis = json.dumps(lyrics_analysis.dict())
+    music_style = json.dumps(music_style.dict())
+
+    print("Calling art generation service")
+    result = MyService().process(
+        {
+            "lyrics_analysis":
+                TaskData(data=lyrics_analysis, type=FieldDescriptionType.APPLICATION_JSON),
+            "music_style":
+                TaskData(data=music_style, type=FieldDescriptionType.APPLICATION_JSON)
+        })
+
+    images = []
+    images.append(result["image1"].data)
+    images.append(result["image2"].data)
+    images.append(result["image3"].data)
+
+    print("Save images as temp files")
+    image_dir = "images"
+    os.makedirs(image_dir, exist_ok=True)
+    for i, image in enumerate(images):
+        # image is bytes
+        image_path = os.path.join(image_dir, f"image{i}.png")
+        print("image_path", image_path)
+        with open(image_path, "wb") as f:
+            f.write(image)
+
+    # Build an archive containing the images
+    print("Building archive")
+    archive = BytesIO()
+    with zipfile.ZipFile(archive, 'w') as zip_file:
+        for root, dirs, files in os.walk(image_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                zip_file.write(file_path)
+
+    # Save the archive on disk
+    archive_path = "images.zip"
+    with open(archive_path, "wb") as f:
+        f.write(archive.getvalue())
+
+    print("Archive path", archive_path)
+
+    return FileResponse(archive_path, media_type="application/zip", filename="images.zip",
+                        headers=json.loads(result["metadata"].data))

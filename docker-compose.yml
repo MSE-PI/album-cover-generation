@@ -18,6 +18,10 @@ services:
         pip install -r requirements.txt -r requirements-all.txt &&
         # Run the service
         cd src &&
+        # wget if the model is not present
+        if [ ! -f ./music-cover-model.ckpt ]; then
+          wget https://civitai.com/api/download/models/42492 -nv -O ./music-cover-model.ckpt;
+        fi &&
         uvicorn --reload --host 0.0.0.0 --port 9090 main:app
       "
     environment:
