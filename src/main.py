@@ -36,24 +36,12 @@ negative_prompts = "font++, typo++, signature, text++, watermark++, cropped, dis
                    "jpeg artifacts, low quality, lowres, mutated hands, out of frame, worst quality"
 
 MODEL_ID = "stabilityai/stable-diffusion-2-base"
-CKPT_PATH = "./music-cover-model.ckpt"
 GUIDANCE_SCALE = 5
 
 def build_pipeline_from_model_id(model_id):
-    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16)
+    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32)
     pipe = pipe.to("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     return pipe
-
-
-def build_model_from_ckpt(ckpt_path):
-    print("Building model from checkpoint")
-    pipe = download_from_original_stable_diffusion_ckpt(
-        checkpoint_path_or_dict=ckpt_path,
-        original_config_file="./v1-inference.yml"
-    )
-    pipe.to(torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32)
-    pipe.save_pretrained(MODEL_ID, safe_serialization=True)
-
 
 def prompt_builder(lyrics_infos, music_style):
     # Check if a sentiment is dominant
