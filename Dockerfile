@@ -28,7 +28,5 @@ EXPOSE 80
 # Switch to src directory
 WORKDIR "/app/src"
 
-RUN wget https://civitai.com/api/download/models/42492 -nv -O ./music-cover-model.ckpt
-
 # Command to run on start
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]

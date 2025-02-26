@@ -27,8 +27,8 @@ import os
 import zipfile
 import torch
 from diffusers import StableDiffusionPipeline
-from diffusers.pipelines.stable_diffusion.convert_from_ckpt import download_from_original_stable_diffusion_ckpt
 from io import BytesIO
+import tempfile
 
 settings = get_settings()
 
@@ -38,10 +38,15 @@ negative_prompts = "font++, typo++, signature, text++, watermark++, cropped, dis
 MODEL_ID = "stabilityai/stable-diffusion-2-base"
 GUIDANCE_SCALE = 5
 
+
 def build_pipeline_from_model_id(model_id):
-    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32)
+    pipe = StableDiffusionPipeline.from_pretrained(
+        model_id,
+        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
+    )
     pipe = pipe.to("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
     return pipe
+
 
 def prompt_builder(lyrics_infos, music_style):
     # Check if a sentiment is dominant
@@ -54,7 +59,7 @@ def prompt_builder(lyrics_infos, music_style):
     if dominant_sentiment is not None and not "others":
         sentiment_prompts = f'with a {dominant_sentiment}++++ sentiment '
 
-    prompt = (f'An {music_style["genre_top"]} album cover {sentiment_prompts}'
+    prompt = (f'A {music_style["genre_top"]} album cover {sentiment_prompts}'
               f'but without any text and illustrating the following themes:')
     for i, word in enumerate(lyrics_infos["top_words"]):
         if i == 0:
@@ -91,7 +96,6 @@ class MyService(Service):
             ],
             data_out_fields=[
                 FieldDescription(name="image", type=[FieldDescriptionType.IMAGE_PNG]),
-                FieldDescription(name="metadata", type=[FieldDescriptionType.APPLICATION_JSON]),
             ],
             tags=[
                 ExecutionUnitTag(
@@ -147,6 +151,10 @@ async def lifespan(app: FastAPI):
 
     # Global variable
     global service_service
+
+    # Create tmp directory
+    if not os.path.exists("./tmp"):
+        os.makedirs("./tmp")
 
     # Startup
     logger = get_logger(settings)
@@ -244,9 +252,12 @@ class Data(BaseModel):
     music_style: MusicStyle
 
 
-# TODO: Correct this part of code
 @app.post("/process", tags=['Process'])
 async def handle_process(data: Data):
+    # delete previous temp files
+    for f in os.listdir("./tmp"):
+        if f.startswith("tmp"):
+            os.remove(f"./tmp/{f}")
     lyrics_analysis = data.lyrics_analysis
     music_style = data.music_style
 
@@ -257,41 +268,14 @@ async def handle_process(data: Data):
     result = MyService().process(
         {
             "lyrics_analysis":
-                TaskData(data=lyrics_analysis, type=FieldDescriptionType.APPLICATION_JSON),
+                TaskData(data=lyrics_analysis.encode(), type=FieldDescriptionType.APPLICATION_JSON),
             "music_style":
-                TaskData(data=music_style, type=FieldDescriptionType.APPLICATION_JSON)
+                TaskData(data=music_style.encode(), type=FieldDescriptionType.APPLICATION_JSON),
         })
 
-    images = []
-    images.append(result["image1"].data)
-    images.append(result["image2"].data)
-    images.append(result["image3"].data)
+    image = result["image"].data
 
-    print("Save images as temp files")
-    image_dir = "images"
-    os.makedirs(image_dir, exist_ok=True)
-    for i, image in enumerate(images):
-        # image is bytes
-        image_path = os.path.join(image_dir, f"image{i}.png")
-        print("image_path", image_path)
-        with open(image_path, "wb") as f:
-            f.write(image)
-
-    # Build an archive containing the images
-    print("Building archive")
-    archive = BytesIO()
-    with zipfile.ZipFile(archive, 'w') as zip_file:
-        for root, dirs, files in os.walk(image_dir):
-            for file in files:
-                file_path = os.path.join(root, file)
-                zip_file.write(file_path)
-
-    # Save the archive on disk
-    archive_path = "images.zip"
-    with open(archive_path, "wb") as f:
-        f.write(archive.getvalue())
-
-    print("Archive path", archive_path)
-
-    return FileResponse(archive_path, media_type="application/zip", filename="images.zip",
-                        headers=json.loads(result["metadata"].data))
+    with tempfile.NamedTemporaryFile(prefix="./tmp", suffix=".png", delete=False) as temp_file:
+        temp_file.write(image)
+        temp_file.close()
+        return FileResponse(temp_file.name, media_type="image/png", filename="image.png")
