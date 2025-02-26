@@ -24,10 +24,8 @@ from pydantic import BaseModel
 from fastapi.responses import FileResponse
 import json
 import os
-import zipfile
 import torch
 from diffusers import StableDiffusionPipeline
-from io import BytesIO
 import tempfile
 
 settings = get_settings()
@@ -198,7 +196,8 @@ api_summary = """
 Generate art image (album cover) from lyrics and sentiments.
 """
 
-api_description = """Album Cover Art Generation is an image generation API that allows you to generate an art image (album cover)
+api_description = """Album Cover Art Generation is an image generation API
+that allows you to generate an art image (album cover)
 from lyrics and music style generated with (stabilityai/stable-diffusion-2-base)
 """
 
