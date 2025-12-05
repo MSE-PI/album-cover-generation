@@ -33,7 +33,7 @@ settings = get_settings()
 negative_prompts = "font++, typo++, signature, text++, watermark++, cropped, disfigured, duplicate, error, " \
                    "jpeg artifacts, low quality, lowres, mutated hands, out of frame, worst quality"
 
-MODEL_ID = "stabilityai/stable-diffusion-2-base"
+MODEL_ID = "stabilityai/stable-diffusion-xl-base-1.0"
 GUIDANCE_SCALE = 5
 
 
