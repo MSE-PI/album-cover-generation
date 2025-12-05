@@ -84,10 +84,10 @@ jobs:
 #        uses: swiss-ai-center/common-code/.github/actions/test-python-app@main
 #        with:
 #          python-app-path: .
- #         token: ${{ secrets.GITHUB_TOKEN }}
+#          token: ${{ secrets.GITHUB_TOKEN }}
 
   release:
-    needs: test
+    needs: review
     runs-on: ubuntu-latest
     if: ${{ vars.RUN_CICD == 'true' && success() && github.ref == 'refs/heads/main' && (vars.DEPLOY_DEV == 'true' || vars.DEPLOY_PROD == 'true') }}
     steps:
