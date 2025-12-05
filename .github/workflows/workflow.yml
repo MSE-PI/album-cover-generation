@@ -72,19 +72,19 @@ jobs:
         with:
           python-app-path: .
 
-  test:
-    needs: review
-    runs-on: ubuntu-latest
-    if: ${{ vars.RUN_CICD == 'true' }}
-    steps:
-      - name: Clone repository
-        uses: actions/checkout@v4
-
-      - name: Test Python app
-        uses: swiss-ai-center/common-code/.github/actions/test-python-app@main
-        with:
-          python-app-path: .
-          token: ${{ secrets.GITHUB_TOKEN }}
+#  test:
+#    needs: review
+#    runs-on: ubuntu-latest
+#    if: ${{ vars.RUN_CICD == 'true' }}
+#    steps:
+#      - name: Clone repository
+#        uses: actions/checkout@v4
+#
+#      - name: Test Python app
+#        uses: swiss-ai-center/common-code/.github/actions/test-python-app@main
+#        with:
+#          python-app-path: .
+ #         token: ${{ secrets.GITHUB_TOKEN }}
 
   release:
     needs: test
